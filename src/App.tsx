@@ -106,7 +106,9 @@ function Workspace() {
   const [collapsed, setCollapsed] = useState(() => autoCollapsed(page));
   const [modulePage, setModulePage] = useState(page);
   if (modulePage !== page) { setModulePage(page); setCollapsed(autoCollapsed(page)); }
-  const openModule = (key: string) => { setCollapsed(autoCollapsed(key)); nav(key); };
+  // Each sidebar click on CRM re-enters it fresh (Pipeline · Kanban), even when CRM is already open.
+  const [crmEntry, setCrmEntry] = useState(0);
+  const openModule = (key: string) => { setCollapsed(autoCollapsed(key)); if (key === 'crm') setCrmEntry(n => n + 1); nav(key); };
   const toggleSidebar = () => setCollapsed(c => !c);
   useOverflowTitles();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -152,7 +154,7 @@ function Workspace() {
       </header>
       <main className="content" ref={contentRef} id="main">
         {page === 'dashboard' && <Dashboard />}
-        {page === 'crm' && <CRM key={routeQuery('stage')} tab={route[1]} />}
+        {page === 'crm' && <CRM key={`${routeQuery('stage')}|${crmEntry}`} tab={route[1]} />}
         {page === 'sales' && <Sales leadId={route[1]} />}
         {page === 'procurement' && <Procurement key={qKey} tab={route[1]} />}
         {page === 'inventory' && <Inventory tab={route[1]} />}

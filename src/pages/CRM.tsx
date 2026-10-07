@@ -242,14 +242,16 @@ function DealCard({ lead, value, today, onOpen }: { lead: Lead; value: number; t
 export default function CRM({ tab }: { tab?: string }) {
   const db = useStore(s => s.db);
   const section: 'pipeline' | 'accounts' = tab === 'accounts' ? 'accounts' : 'pipeline';
-  const [view, setView] = useState<'list' | 'board'>(() => (localStorage.getItem('crm-view') as 'list' | 'board') || 'list');
+  // Entering CRM (sidebar) always opens Pipeline as Kanban; List is a manual toggle for the current visit.
+  // A deep link with a stage filter (e.g. from Dashboard) opens the filtered list.
+  const [view, setView] = useState<'list' | 'board'>(() => routeQuery('stage') ? 'list' : 'board');
   const [q, setQ] = useState('');
   const [stageF, setStageF] = useState(() => { const s = routeQuery('stage'); return s === 'open' || (LEAD_STAGES as readonly string[]).includes(s) ? s : ''; });
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<LeadStage | null>(null);
-  const setV = (v: 'list' | 'board') => { setView(v); try { localStorage.setItem('crm-view', v); } catch { /* ignore */ } };
+  const setV = setView;
 
   const ql = q.toLowerCase();
   const leads = db.leads.filter(l => (!stageF || (stageF === 'open' ? isOpenStage(l.stage) : l.stage === stageF)) &&
