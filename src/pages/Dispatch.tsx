@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { Truck, Send, Upload } from 'lucide-react';
-import { useStore, leadById } from '../store';
-import type { Dispatch as DispatchRec } from '../lib/types';
-import { qty as fq, fmtDate, fmtShort, fmtDateTime, todayISO, addDays, parseTermsDays, inr } from '../lib/format';
-import { storeFile } from '../lib/files';
-import { PageHead, Button, Badge, Empty, Modal, Field, Input, Alert, FilePick, FileLink, Tabs, SearchBox, Select, Cols, useList, attempt, toast } from '../ui/kit';
-import { routeQuery } from '../ui/router';
+import { Truck, Send, Upload, FileText, ArrowRight } from 'lucide-react';
+import { useStore, leadById, receivableBalance } from '../store';
+import type { Dispatch as DispatchRec, FileMeta } from '../lib/types';
+import { qty as fq, fmtDate, fmtDateTime, todayISO, addDays, parseTermsDays, inr } from '../lib/format';
+import { storeFile, openFile } from '../lib/files';
+import { PageHead, Button, Badge, Empty, Modal, Drawer, KV, Field, Input, Alert, FilePick, FileLink, Tabs, SearchBox, Select, Cols, useList, attempt, toast, toastError } from '../ui/kit';
+import { nav, routeQuery } from '../ui/router';
 import { sampleDispatch, samplePodFile } from '../lib/samples';
+
+const viewPod = (meta: FileMeta) => openFile(meta).catch(e => toastError(e.message));
 
 export default function Dispatch() {
   const db = useStore(s => s.db);
@@ -16,6 +18,7 @@ export default function Dispatch() {
   const [podFilter, setPodFilter] = useState('');
   const [confirm, setConfirm] = useState<DispatchRec | null>(null);
   const [pod, setPod] = useState<DispatchRec | null>(null);
+  const [detail, setDetail] = useState<string | null>(null);
   const ql = q.trim().toLowerCase();
   const rows = db.dispatches.filter(d => tab === 'ready' ? d.status === 'Ready' : d.status === 'Dispatched')
     .filter(d => tab === 'ready' || !podFilter || (podFilter === 'pending' ? !d.pod : !!d.pod))
@@ -25,7 +28,8 @@ export default function Dispatch() {
       return [d.ref, leadById(db, d.leadId)?.company, mo?.ref, mo?.productName, so?.ref, d.vehicleNo, d.lrNumber, d.transporter, rec?.ref].some(x => x?.toLowerCase().includes(ql));
     });
   const company = (d: DispatchRec) => leadById(db, d.leadId)?.company;
-  const list = useList(rows, { resetKey: [q, tab, podFilter], sort: { ref: d => d.ref, client: company, qty: d => d.qty, ready: d => d.readyAt, date: d => d.dispatchDate, pod: d => d.pod ? 1 : 0, rec: d => db.receivables.find(r => r.id === d.receivableId)?.ref } });
+  const list = useList(rows, { resetKey: [q, tab, podFilter], sort: { ref: d => d.ref, client: company, qty: d => d.qty, ready: d => d.readyAt, date: d => d.dispatchDate, pod: d => d.pod ? 1 : 0 } });
+  const ready = tab === 'ready';
   return <>
     <PageHead title="Dispatch" sub="Finished goods arrive here automatically. Confirming a dispatch reduces finished goods and creates the receivable." />
     <Tabs value={tab} onChange={setTab} tabs={[{ key: 'ready', label: 'Ready to dispatch', count: db.dispatches.filter(d => d.status === 'Ready').length },
@@ -33,35 +37,77 @@ export default function Dispatch() {
         attention: db.dispatches.filter(d => d.status === 'Dispatched' && !d.pod).length, attentionLabel: 'POD pending' }]} />
     <div className="card list">
       {db.dispatches.length > 0 && <div className="toolbar">
-        <SearchBox value={q} onChange={setQ} placeholder="Search dispatch, client, SO/MO, vehicle, LR…" />
-        {tab === 'done' && <Select aria-label="Filter by POD" value={podFilter} onChange={e => setPodFilter(e.target.value)} style={{ width: 160 }}>
+        <SearchBox value={q} onChange={setQ} placeholder="Search dispatches…" />
+        {!ready && <Select aria-label="Filter by POD" value={podFilter} onChange={e => setPodFilter(e.target.value)} style={{ width: 160 }}>
           <option value="">All PODs</option><option value="pending">POD pending</option><option value="received">POD received</option></Select>}
       </div>}
-      {!rows.length ? <Empty icon={<Truck size={20} />} title={ql || podFilter ? 'No dispatches match' : tab === 'ready' ? 'Nothing ready to dispatch' : 'No dispatches yet'}
-        body={tab === 'ready' ? 'When an MO reaches “Finished goods ready”, it appears here.' : 'Confirmed dispatches will be listed here.'} />
-        : <><div className="table-scroll"><table className="tbl fixed">
-          <Cols w={tab === 'ready' ? [150, undefined, 120, 150, 170] : [140, undefined, 92, 88, 128, 124, 140, 120]} />
-          <thead><tr>{list.th('ref', 'Dispatch')}{list.th('client', 'Client / product')}{list.th('qty', 'Qty', 'num')}
-            {tab === 'ready' ? list.th('ready', 'Ready since') : <>{list.th('date', 'Dispatched')}<th>Vehicle / LR</th>{list.th('pod', 'POD')}{list.th('rec', 'Receivable')}</>}<th><span className="sr-only">Action</span></th></tr></thead>
+      {!rows.length ? <Empty icon={<Truck size={20} />} title={ql || podFilter ? 'No dispatches match' : ready ? 'Nothing ready to dispatch' : 'No dispatches yet'}
+        body={ready ? 'When an MO reaches “Finished goods ready”, it appears here.' : 'Confirmed dispatches will be listed here.'} />
+        : <><div className="table-scroll"><table className="tbl fixed tbl-dispatch">
+          <Cols w={ready ? [150, undefined, 140, 140, 180] : [150, undefined, 130, 140, 140, 130]} />
+          <thead><tr>{list.th('ref', 'Dispatch')}{list.th('client', 'Client / product')}{list.th('qty', 'Quantity', 'num')}
+            {ready ? list.th('ready', 'Ready date') : <>{list.th('date', 'Dispatch date')}{list.th('pod', 'POD')}</>}<th className="right">Action</th></tr></thead>
           <tbody>{list.rows.map(d => {
-            const mo = db.mos.find(m => m.id === d.moId), so = db.salesOrders.find(s => s.id === d.soId), rec = db.receivables.find(r => r.id === d.receivableId);
+            const mo = db.mos.find(m => m.id === d.moId);
             return <tr key={d.id}>
-              <td><div className="mono primary-cell">{d.ref}</div><div className="sub mono">{[so?.ref, mo?.ref].filter(Boolean).join(' · ')}</div></td>
-              <td><div className="primary-cell">{leadById(db, d.leadId)?.company}</div><div className="sub">{mo?.productName}</div></td>
-              <td className="num small">{fq(d.qty, d.unit)}</td>
-              {tab === 'ready' ? <td className="muted small">{fmtDateTime(d.readyAt)}</td> : <>
-                <td className="small" title={fmtDate(d.dispatchDate)}>{fmtShort(d.dispatchDate)}</td>
-                <td className="small"><div>{d.vehicleNo}</div><div className="sub">{[d.transporter, d.lrNumber && `LR ${d.lrNumber}`].filter(Boolean).join(' · ')}</div></td>
-                <td>{d.pod ? <FileLink meta={d.pod} compact /> : <Badge tone="warning">POD pending</Badge>}</td>
-                <td className="small">{rec ? <><div className="mono">{rec.ref}</div><div className="sub" title={`${inr(rec.amount)} · due ${fmtDate(rec.dueDate)}`}>{inr(rec.amount)} · due {fmtShort(rec.dueDate)}</div></> : '—'}</td></>}
-              <td className="right">{tab === 'ready' ? <Button size="sm" variant="primary" icon={<Send size={13} />} onClick={() => setConfirm(d)}>Confirm dispatch</Button>
-                : !d.pod && <Button size="sm" icon={<Upload size={13} />} onClick={() => setPod(d)}>Add POD</Button>}</td>
+              <td><button className="link mono strong" onClick={() => setDetail(d.id)} title={`Open ${d.ref} details`}>{d.ref}</button></td>
+              <td><div className="primary-cell" title={company(d)}>{company(d)}</div><div className="sub" title={mo?.productName}>{mo?.productName}</div></td>
+              <td className="num">{fq(d.qty, d.unit)}</td>
+              {ready ? <td title={fmtDateTime(d.readyAt)}>{fmtDate(d.readyAt)}</td> : <>
+                <td>{fmtDate(d.dispatchDate)}</td>
+                <td>{d.pod ? <button className="link row pod-link" onClick={() => viewPod(d.pod!)} title={`Open ${d.pod.name}`}><FileText size={14} aria-hidden />View POD</button>
+                  : <Badge tone="neutral" plain>Pending</Badge>}</td></>}
+              <td className="right">{ready ? <Button size="sm" variant="primary" icon={<Send size={13} />} onClick={() => setConfirm(d)}>Confirm dispatch</Button>
+                : !d.pod ? <Button size="sm" icon={<Upload size={13} />} onClick={() => setPod(d)}>Add POD</Button>
+                : <Button size="sm" variant="ghost" onClick={() => setDetail(d.id)}>Details</Button>}</td>
             </tr>;
           })}</tbody></table></div>{list.pager}</>}
     </div>
+    {detail && <DispatchDrawer id={detail} onClose={() => setDetail(null)} onConfirm={d => setConfirm(d)} onAddPod={d => setPod(d)} />}
     {confirm && <ConfirmModal d={confirm} onClose={() => setConfirm(null)} onDone={() => setTab('done')} />}
     {pod && <PodModal d={pod} onClose={() => setPod(null)} />}
   </>;
+}
+
+/** Everything about one dispatch: record, linked SO/MO, transport, POD and the receivable it created. */
+function DispatchDrawer({ id, onClose, onConfirm, onAddPod }: { id: string; onClose: () => void; onConfirm: (d: DispatchRec) => void; onAddPod: (d: DispatchRec) => void }) {
+  const db = useStore(s => s.db);
+  const d = db.dispatches.find(x => x.id === id);
+  if (!d) return null;
+  const lead = leadById(db, d.leadId);
+  const mo = db.mos.find(m => m.id === d.moId), so = db.salesOrders.find(s => s.id === d.soId);
+  const rec = db.receivables.find(r => r.id === d.receivableId);
+  const bal = rec ? receivableBalance(rec) : undefined;
+  const podDoc = d.podDocumentId ? db.documents.find(x => x.id === d.podDocumentId) : undefined;
+  const done = d.status === 'Dispatched';
+  const go = (path: string) => { onClose(); nav(path); };
+  return <Drawer title={d.ref} subtitle={<span className="row">{lead?.company}<Badge tone={done ? 'success' : 'warning'}>{done ? 'Dispatched' : 'Ready to dispatch'}</Badge></span>} onClose={onClose}
+    footer={!done ? <Button variant="primary" icon={<Send size={15} />} onClick={() => { onClose(); onConfirm(d); }}>Confirm dispatch</Button> : undefined}>
+    <div className="section-title">Dispatch</div>
+    <KV items={[['Client', lead ? <>{lead.company}{lead.project && <div className="muted small">{lead.project}</div>}</> : ''], ['Product', mo?.productName ?? ''], ['Quantity', fq(d.qty, d.unit)],
+      ['Ready since', fmtDateTime(d.readyAt)], ['Dispatch date', done ? fmtDate(d.dispatchDate) : <span className="faint">Not dispatched yet</span>]]} />
+    <div className="section-title mt24">Linked records</div>
+    <KV items={[
+      ['Sales order', so ? <button className="link mono" onClick={() => go(`sales/${d.leadId}`)}>{so.ref}</button> : ''],
+      ['Manufacturing order', mo ? <button className="link mono" onClick={() => go(`manufacturing?focus=${encodeURIComponent(mo.id)}`)}>{mo.ref}</button> : ''],
+    ]} />
+    {done && <>
+      <div className="section-title mt24">Transport</div>
+      <KV items={[['Vehicle', d.vehicleNo ?? ''], ['Transporter', d.transporter ?? ''], ['Driver', d.driver ?? ''], ['LR number', d.lrNumber ? <span className="mono">{d.lrNumber}</span> : '']]} />
+      <div className="section-title mt24">Proof of delivery</div>
+      {d.pod ? <KV items={[['File', <FileLink meta={d.pod} />],
+        ['Document', podDoc ? <button className="link" onClick={() => go(`documents?q=${encodeURIComponent(d.ref)}`)}>Open in Documents <ArrowRight size={12} aria-hidden /></button> : '']]} />
+        : <div className="row"><Badge tone="neutral" plain>Pending</Badge><span className="muted small">No POD uploaded yet.</span>
+          <Button size="sm" icon={<Upload size={13} />} onClick={() => { onClose(); onAddPod(d); }}>Add POD</Button></div>}
+      <div className="section-title mt24">Receivable</div>
+      {rec && bal ? <KV items={[
+        ['Receivable', <button className="link mono" onClick={() => go(`finance/receivables?q=${encodeURIComponent(rec.ref)}`)}>{rec.ref}</button>],
+        ['Amount', inr(rec.amount)], ['Due date', fmtDate(rec.dueDate)],
+        ['Payment status', <Badge tone={bal.status === 'Paid' ? 'success' : bal.status === 'Partially paid' ? 'info' : 'warning'}>{bal.status}</Badge>],
+        ...(bal.paid > 0 ? [['Received', inr(bal.paid)], ['Outstanding', inr(bal.outstanding)]] as [string, string][] : []),
+      ]} /> : <span className="muted small">No receivable linked.</span>}
+    </>}
+  </Drawer>;
 }
 
 function ConfirmModal({ d, onClose, onDone }: { d: DispatchRec; onClose: () => void; onDone: () => void }) {

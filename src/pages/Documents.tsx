@@ -7,7 +7,7 @@ import { DOC_CATEGORIES } from '../lib/types';
 import { fmtDate, fmtShort, fmtDateTime, fileSize, todayISO, addDays } from '../lib/format';
 import { storeFile, openFile, downloadFile } from '../lib/files';
 import { PageHead, Button, Badge, Empty, Modal, Field, Input, Select, Alert, FilePick, SearchBox, Tabs, InfoTip, Cols, IconAction, useList, attempt, toastError } from '../ui/kit';
-import { nav } from '../ui/router';
+import { nav, routeQuery } from '../ui/router';
 import type { DocumentRec } from '../lib/types';
 
 const REF_LABEL: Record<DocRefType, string> = { quote: 'Quote', cpo: 'Client PO', so: 'Sales order', mo: 'Manufacturing order', po: 'Supplier PO', grn: 'GRN',
@@ -78,7 +78,7 @@ function Licences() {
 
 function Library() {
   const db = useStore(s => s.db);
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(() => routeQuery('q'));
   const [cat, setCat] = useState('');
   const [client, setClient] = useState('');
   const [supplier, setSupplier] = useState('');

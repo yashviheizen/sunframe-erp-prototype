@@ -194,7 +194,7 @@ type Chip = { label: string; to: string; tone?: 'warn' | 'bad' | 'ok' };
 function downstreamLinks(db: DB, lead: Lead): Chip[] {
   const mo = moForLead(db, lead.id);
   if (!mo) return [];
-  const out: Chip[] = [{ label: mo.ref, to: `manufacturing?q=${mo.ref}`, tone: mo.fgPosted ? 'ok' : undefined }];
+  const out: Chip[] = [{ label: mo.ref, to: `manufacturing?focus=${mo.id}`, tone: mo.fgPosted ? 'ok' : undefined }];
   for (const pr of prsForMO(db, mo.id)) {
     out.push({ label: `${pr.ref} · ${pr.status}`, to: `procurement/prs?q=${pr.ref}`, tone: pr.status === 'Rejected' ? 'bad' : pr.status === 'Pending' ? 'warn' : 'ok' });
     const po = pr.poId ? db.supplierPOs.find(x => x.id === pr.poId) : undefined;
@@ -752,7 +752,7 @@ function MOPanel({ lead }: { lead: Lead }) {
     <PanelHead title="Manufacturing order" sub={`${mo.ref} · ${fq(mo.qty, mo.unit)} of ${mo.productName}`}
       badge={<Badge tone={mo.fgPosted ? 'success' : st.ready ? 'info' : 'danger'}>{mo.fgPosted ? 'Finished goods ready' : mo.materialsIssued ? 'Materials issued' : st.ready ? 'Fully reserved' : 'Short'}</Badge>}
       actions={<>{!mo.materialsIssued && !st.ready && <Button size="sm" icon={<RefreshCw size={13} />} onClick={() => { const r = attempt(() => useStore.getState().allocateMO(mo.id)); if (r.ok) toast(r.value > 0 ? 'More stock reserved' : 'No additional stock available yet'); else toastError(r.error); }}>Re-check stock</Button>}
-        <Button size="sm" variant="primary" icon={<ArrowRight size={14} />} onClick={() => nav(`manufacturing?q=${mo.ref}`)}>Open in Manufacturing</Button></>} />
+        <Button size="sm" variant="primary" icon={<ArrowRight size={14} />} onClick={() => nav(`manufacturing?focus=${encodeURIComponent(mo.id)}`)}>Open in Manufacturing</Button></>} />
     <div className="card-pad">
       {open.length > 0 && !mo.materialsIssued && <div className="mb12"><Alert kind={rejected ? 'error' : 'warning'}>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>

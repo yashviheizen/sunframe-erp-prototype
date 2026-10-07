@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Factory, Settings2, PackageOpen, ArrowRight, Check, Plus, Trash2, ArrowUp, ArrowDown, Lock, RefreshCw, Inbox, CalendarDays, ArrowLeftRight, X, GripVertical } from 'lucide-react';
 import { useStore, isAdmin, leadById, moMaterialStatus, stageIndex, prsForMO, moOpenShortfall, FIXED_FIRST_STAGE, FIXED_LAST_STAGE } from '../store';
 import type { ManufacturingOrder, StageDef, StageGroup } from '../lib/types';
@@ -74,6 +74,33 @@ function Board({ onOpen }: { onOpen: (id: string) => void }) {
     { key: 'Line 2', title: 'Line 2', sub: 'Assigned orders', cls: 'line2' },
   ];
   const lanes = allLanes.filter(l => !line || (line === 'queue' ? l.key === null : l.key === line));
+  const shown = active.filter(m => lanes.some(l => l.key === m.line));
+  // "?focus=<MO id>" (e.g. "Open in Manufacturing" from Sales) shows the full board and briefly highlights that card.
+  // It never filters: search and line/status filters are cleared, and the card's lane is scrolled internally to reveal it.
+  const focusParam = routeQuery('focus');
+  const [focusId, setFocusId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusParam) return;
+    // Drop the parameter so a refresh or the sidebar shows the plain board without re-highlighting.
+    history.replaceState(null, '', '#/manufacturing');
+    const mo = useStore.getState().db.mos.find(m => m.id === focusParam);
+    if (!mo) return;
+    // Completed orders are not on the open board, so those alone switch to the completed view.
+    setQ(''); setStatus(mo.fgPosted ? 'fg' : ''); setLine(''); setFocusId(focusParam);
+  }, [focusParam]);
+  useEffect(() => {
+    if (!focusId) return;
+    const raf = requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`.mo-card[data-mo="${CSS.escape(focusId)}"]`);
+      const list = card?.closest<HTMLElement>('.lane-cards');
+      if (!card || !list) return;
+      const c = card.getBoundingClientRect(), r = list.getBoundingClientRect();
+      if (c.top < r.top || c.bottom > r.bottom) list.scrollTop += c.top - r.top - 8;
+      card.focus({ preventScroll: true });
+    });
+    const t = setTimeout(() => setFocusId(f => (f === focusId ? null : f)), 2800);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+  }, [focusId]);
   // Drag-and-drop between lanes (admins only). Every drop goes through the same assignLine action as the buttons.
   const [dragId, setDragId] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -112,7 +139,8 @@ function Board({ onOpen }: { onOpen: (id: string) => void }) {
         <option value="prod">In production</option><option value="fg">Completed (FG ready)</option></Select>
       <Select aria-label="Filter by line" value={line} onChange={e => setLine(e.target.value)} style={{ width: 160 }}>
         <option value="">All lines</option><option value="queue">Unassigned</option><option>Line 1</option><option>Line 2</option></Select>
-      <span className="muted small">{active.length} shown</span>
+      {(q || status || line) && <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => { setQ(''); setStatus(''); setLine(''); }}>Clear</Button>}
+      <span className="muted small">{shown.length} shown</span>
     </div></div>}
     {!db.mos.length ? <div className="card"><Empty icon={<Factory size={20} />} title="No manufacturing orders yet"
       body="An MO is created from a sales record after the SO is generated. It reserves stock and joins the queue here."
@@ -136,7 +164,7 @@ function Board({ onOpen }: { onOpen: (id: string) => void }) {
               {chk && !chk.same && <div className={'drop-slot' + (chk.ok ? '' : ' bad') + (isOver ? ' on' : '') + (mos.length ? '' : ' tall')} aria-hidden>
                 {chk.ok ? (l.key ? `Drop to ${dragMo!.line ? 'move' : 'assign'} to ${l.title}` : 'Drop to return to the queue') : chk.reason}</div>}
               {!mos.length && !(chk && !chk.same) && <div className="board-empty"><Icon size={16} style={{ display: 'block', margin: '0 auto 4px' }} />{l.key ? 'No orders on this line' : 'Nothing waiting'}</div>}
-              {mos.map(m => <MOCard key={m.id} mo={m} admin={admin} dragging={dragId === m.id} flash={flash === m.id}
+              {mos.map(m => <MOCard key={m.id} mo={m} admin={admin} dragging={dragId === m.id} flash={flash === m.id} focused={focusId === m.id}
                 onOpen={() => { if (Date.now() - lastDrag.current > 300) onOpen(m.id); }}
                 onDragStart={() => setTimeout(() => setDragId(m.id), 0)} onDragEnd={endDrag} />)}
             </div>
@@ -249,7 +277,7 @@ function Readiness({ mo }: { mo: ManufacturingOrder }) {
 }
 
 /** Board card: ref + readiness, client, product and qty, stage (or "Awaiting assignment"), planned date and the line action. */
-function MOCard({ mo, admin, onOpen, dragging, flash, onDragStart, onDragEnd }: { mo: ManufacturingOrder; admin: boolean; onOpen: () => void; dragging?: boolean; flash?: boolean; onDragStart?: () => void; onDragEnd?: () => void }) {
+function MOCard({ mo, admin, onOpen, dragging, flash, focused, onDragStart, onDragEnd }: { mo: ManufacturingOrder; admin: boolean; onOpen: () => void; dragging?: boolean; flash?: boolean; focused?: boolean; onDragStart?: () => void; onDragEnd?: () => void }) {
   const db = useStore(s => s.db);
   const [picking, setPicking] = useState(false);
   const lead = leadById(db, mo.leadId);
@@ -265,7 +293,7 @@ function MOCard({ mo, admin, onOpen, dragging, flash, onDragStart, onDragEnd }: 
   if (mo.line && !mo.materialsIssued) choices.push({ v: null, label: 'Unassigned' });
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   const movable = admin && !mo.fgPosted && !picking && !!onDragStart;
-  return <article className={'mo-card' + (short ? ' short' : '') + (movable ? ' movable' : '') + (dragging ? ' dragging' : '') + (flash ? ' flash' : '')} tabIndex={0} role="button"
+  return <article className={'mo-card' + (short ? ' short' : '') + (movable ? ' movable' : '') + (dragging ? ' dragging' : '') + (flash ? ' flash' : '') + (focused ? ' focused' : '')} data-mo={mo.id} tabIndex={0} role="button"
     aria-label={`Open ${mo.ref}, ${lead?.company ?? ''}`} aria-description={movable ? 'Drag to a lane, or use the line button' : undefined}
     draggable={movable}
     onDragStart={movable ? e => { e.dataTransfer.setData('text/plain', mo.id); e.dataTransfer.effectAllowed = 'move'; dragPreview(e, mo, lead?.company ?? ''); onDragStart!(); } : undefined}

@@ -519,6 +519,9 @@ body:has(.login-page) { min-width: 0; }
 .mo-card.movable:hover .drag-handle { color: var(--text-2); }
 .mo-card.dragging { opacity: .45; border-style: dashed; box-shadow: none; }
 .mo-card.flash { animation: mo-flash 1.6s ease-out; }
+/* Card opened via "Open in Manufacturing": held highlight that fades out. */
+.mo-card.focused { animation: mo-focus 2.8s ease-out; }
+@keyframes mo-focus { 0%, 55% { box-shadow: 0 0 0 3px rgba(18, 128, 92, .35); border-color: #7CC4A6; background: #F2FAF6; } 100% { box-shadow: 0 0 0 0 rgba(18, 128, 92, 0); } }
 @keyframes mo-flash { 0% { box-shadow: 0 0 0 3px rgba(18, 128, 92, .35); border-color: #7CC4A6; } 100% { box-shadow: 0 0 0 0 rgba(18, 128, 92, 0); } }
 .lane { transition: border-color .12s, box-shadow .12s; }
 .lane.drop-ok { border-color: #D9B46A; }
@@ -534,3 +537,10 @@ body:has(.login-page) { min-width: 0; }
 .drag-preview b { font-family: 'SF Mono', ui-monospace, Menlo, monospace; font-size: 12px; }
 .drag-preview span { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drag-preview small { color: var(--text-2); font-size: 11px; }
+
+/* Dispatch lists: roomier rows, one primary + one secondary line per cell. */
+.tbl.tbl-dispatch td { height: 54px; padding: 7px 12px; }
+.tbl.tbl-dispatch th { padding: 0 12px; }
+.tbl.tbl-dispatch td .sub { margin-top: 1px; }
+.tbl.tbl-dispatch td.right, .tbl.tbl-dispatch th.right { text-align: right; }
+.tbl.fixed.tbl-dispatch td > button.link.pod-link { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }

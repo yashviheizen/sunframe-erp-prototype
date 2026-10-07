@@ -159,7 +159,7 @@ function Workspace() {
         {page === 'manufacturing' && <Manufacturing key={qKey} tab={route[1]} />}
         {page === 'dispatch' && <Dispatch key={qKey} />}
         {page === 'finance' && <Finance key={qKey} tab={route[1]} />}
-        {page === 'documents' && <Documents tab={route[1]} />}
+        {page === 'documents' && <Documents key={qKey} tab={route[1]} />}
         {page === 'hrms' && <HRMS tab={route[1]} />}
         {page === 'settings' && <Settings tab={route[1]} />}
       </main>
