@@ -68,17 +68,29 @@ Everything stays editable and normal validation, roles and workflow prerequisite
   records no payment — that only happens on Save / Confirm through the existing store actions.
 - **Coherent data:** existing materials, units and suppliers are reused; references (lead company, Client PO number,
   supplier quotation ref, GRN number, LR number, UTR, employee/user names and emails) are checked to be unused.
-  New quotes carry one product line matching the BOM output, so the SO matches the BOM and the MO needs no
-  reconciliation (if it does, the reconciliation note is prefilled but must still be confirmed). PR-linked POs keep the
-  approved quantities. Payments default to about half the outstanding balance, never more. Stock adjustments never
-  go below the reserved quantity. Pending PRs are never preselected on a PO.
+  PR-linked POs keep the approved quantities. Stock adjustments never go below the reserved quantity. Pending PRs are
+  never preselected on a PO. The MO reconciliation note is prefilled when the SO and BOM quantities differ, but must
+  still be confirmed.
+- **Not prefilled (entered by the user):**
+  - **New BOM:** starts with exactly one material row. Saved BOMs always load their own rows, and deleted rows never
+    come back.
+  - **New quote:** only real context is carried in: one line with the BOM's product and output quantity. The rate,
+    charges and terms are left empty, except company defaults set in Settings → Company. Saved quotes and revisions
+    keep their own data.
+  - **Client PO:** a document upload only, with no line items, amounts or terms. After saving it is read-only (view or
+    download, also listed in Documents). Nothing is extracted from the file.
+  - **Sales order:** items come from the won quote. Payment terms, delivery terms, delivery address and T&Cs are entered
+    or reviewed in the SO form.
+  - **Payments (receivables and payables):** the amount starts blank, with a *Full balance* shortcut. Status comes only
+    from cumulative recorded amounts: none is Pending, below the total is Partially paid, the full total is Paid.
+    Attaching a payment proof never changes the status.
 - **Sample attachments:** Client PO, supplier quotation, GRN challan, POD, payment proof and document uploads offer a
   **generated PDF** (real content, `SAMPLE-…pdf`, "FICTIONAL SAMPLE" on every page). The file chooser labels it
   *Sample · fictional*, lets you Preview, Remove or Replace it, and offers **Use sample file** when empty. It is stored
   in IndexedDB only when the form is saved. At dispatch the POD sample is offered, not attached (PODs usually arrive later).
 - People, companies and emails are fictional (`.example` domain). Company terms come from Settings → Company when set.
 
-Forms that need a prerequisite before they can be prefilled: Quote (needs a BOM), Client PO (lead closed as won),
+Forms that need a prerequisite: Quote (needs a BOM), Client PO upload (lead closed as won),
 SO (Client PO), MO (SO + BOM), GRN (approved PO), dispatch (finished goods ready), receipt/payment (an outstanding
 receivable/payable), stock adjustment (a material), leave (an active employee), payroll (employees and a month without
 a run), supplier quotation and supplier PO (an active supplier). Real documents must always be chosen by the user.

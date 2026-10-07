@@ -49,9 +49,9 @@ export function PriceLinesEditor({ lines, onChange, readOnly, showRate = true }:
         {readOnly ? <><td>{l.description}</td><td className="num">{fq(l.qty)}</td><td>{l.unit}</td>{showRate && <><td className="num">{inr(l.rate, { decimals: true })}</td><td className="num">{inr(lineTotal(l), { decimals: true })}</td></>}</>
           : <>
             <td><Input aria-label={`Line ${i + 1} description`} value={l.description} onChange={e => upd(l.id, { description: e.target.value })} /></td>
-            <td><NumInput aria-label={`Line ${i + 1} quantity`} className="right" value={l.qty} onChange={n => upd(l.id, { qty: n })} /></td>
+            <td><NumInput aria-label={`Line ${i + 1} quantity`} className="right" blankZero placeholder="0" value={l.qty} onChange={n => upd(l.id, { qty: n })} /></td>
             <td><Select aria-label={`Line ${i + 1} unit`} value={l.unit} onChange={e => upd(l.id, { unit: e.target.value })}>{[...new Set([...UNITS, l.unit])].map(u => <option key={u}>{u}</option>)}</Select></td>
-            {showRate && <><td><NumInput aria-label={`Line ${i + 1} rate`} className="right" value={l.rate} onChange={n => upd(l.id, { rate: n })} /></td>
+            {showRate && <><td><NumInput aria-label={`Line ${i + 1} rate`} className="right" blankZero placeholder="0.00" value={l.rate} onChange={n => upd(l.id, { rate: n })} /></td>
               <td className="num">{inr(lineTotal(l), { decimals: true })}</td></>}
             <td><Button size="sm" variant="ghost" iconOnly aria-label={`Remove line ${i + 1}`} disabled={lines.length <= 1} onClick={() => onChange?.(lines.filter(x => x.id !== l.id))} icon={<Trash2 size={14} />} /></td>
           </>}

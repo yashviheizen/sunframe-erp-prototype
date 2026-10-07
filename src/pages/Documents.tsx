@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { FolderOpen, Upload, ExternalLink, Download } from 'lucide-react';
-import { useStore } from '../store';
+import { useStore, clientPoLabel } from '../store';
 import { sampleDocumentFile } from '../lib/samples';
 import type { DocCategory, DocRefType, DB } from '../lib/types';
 import { DOC_CATEGORIES } from '../lib/types';
@@ -126,7 +126,7 @@ function Library() {
 export function leadRecords(db: DB, leadId: string): { type: DocRefType; id: string; ref: string; label: string }[] {
   const out: { type: DocRefType; id: string; ref: string; label: string }[] = [];
   const q = db.quotes.find(x => x.leadId === leadId); if (q) out.push({ type: 'quote', id: q.id, ref: q.ref, label: `Quote ${q.ref}` });
-  const c = db.clientPOs.find(x => x.leadId === leadId); if (c) out.push({ type: 'cpo', id: c.id, ref: c.poNumber, label: `Client PO ${c.poNumber}` });
+  const c = db.clientPOs.find(x => x.leadId === leadId); if (c) out.push({ type: 'cpo', id: c.id, ref: clientPoLabel(c), label: `Client PO ${clientPoLabel(c)}` });
   const so = db.salesOrders.find(x => x.leadId === leadId); if (so) out.push({ type: 'so', id: so.id, ref: so.ref, label: `Sales order ${so.ref}` });
   const mo = db.mos.find(x => x.leadId === leadId); if (mo) out.push({ type: 'mo', id: mo.id, ref: mo.ref, label: `Manufacturing order ${mo.ref}` });
   db.dispatches.filter(d => d.leadId === leadId).forEach(d => out.push({ type: 'dispatch', id: d.id, ref: d.ref, label: `Dispatch ${d.ref}` }));

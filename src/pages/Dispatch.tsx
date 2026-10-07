@@ -94,7 +94,7 @@ function DispatchDrawer({ id, onClose, onConfirm, onAddPod }: { id: string; onCl
     {done && <>
       <div className="section-title mt24">Transport</div>
       <KV items={[['Vehicle', d.vehicleNo ?? ''], ['Transporter', d.transporter ?? ''], ['Driver', d.driver ?? ''], ['LR number', d.lrNumber ? <span className="mono">{d.lrNumber}</span> : '']]} />
-      <div className="section-title mt24">Proof of delivery</div>
+      <div className="section-title mt24">POD / Proof of Delivery</div>
       {d.pod ? <KV items={[['File', <FileLink meta={d.pod} />],
         ['Document', podDoc ? <button className="link" onClick={() => go(`documents?q=${encodeURIComponent(d.ref)}`)}>Open in Documents <ArrowRight size={12} aria-hidden /></button> : '']]} />
         : <div className="row"><Badge tone="neutral" plain>Pending</Badge><span className="muted small">No POD uploaded yet.</span>
@@ -143,7 +143,7 @@ function ConfirmModal({ d, onClose, onDone }: { d: DispatchRec; onClose: () => v
       <Field label="LR number" htmlFor="d-lr"><Input id="d-lr" value={f.lrNumber} onChange={e => set('lrNumber', e.target.value)} /></Field>
       {days === null && <Field label="Payment due date" required htmlFor="d-due" hint={`Terms “${so?.paymentTerms || 'blank'}” can't be read as days.`}>
         <Input id="d-due" type="date" min={f.dispatchDate} value={f.dueDate} onChange={e => set('dueDate', e.target.value)} /></Field>}
-      <Field label="Proof of delivery (optional)" full hint="You can also upload the POD later."><FilePick file={file} onChange={setFile} sample={podSample} accept="image/*,.pdf" label="Attach POD" /></Field>
+      <Field label="POD / Proof of Delivery (optional)" full hint="You can also upload the POD later."><FilePick file={file} onChange={setFile} sample={podSample} accept="image/*,.pdf" label="Attach POD" /></Field>
     </div>
     <div className="mt16"><Alert kind="info">
       A receivable of <b>{inr(so?.total ?? 0)}</b> will be created{days !== null ? <>, due <b>{fmtDate(addDays(f.dispatchDate, days))}</b> ({days} days from dispatch, per “{so?.paymentTerms}”)</> : ''}.

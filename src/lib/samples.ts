@@ -91,31 +91,6 @@ export function sampleBom(db: DB, lead: Lead) {
   };
 }
 
-const SAMPLE_PAYMENT_TERMS = '30 days from dispatch';
-const SAMPLE_DELIVERY_TERMS = 'Door delivery to site in lots as per erection sequence; unloading by client.';
-const SAMPLE_TNC = 'Prices firm for 15 days. Foundations, civil work and module installation excluded. Delivery schedule from receipt of Client PO and approved drawings.';
-
-/** Latest quoted rate for this unit, so sample prices sit in the same range as real quotes. */
-function recentRate(db: DB, unit: string) {
-  for (const q of [...db.quotes].reverse()) { const l = q.lines.find(x => x.unit === unit && x.rate > 0); if (l) return l.rate; }
-  return unit === 'sets' ? 80000 : 0;
-}
-
-/** Quote lines: one product line matching the BOM output (so SO → MO needs no reconciliation), priced from recent quotes. */
-export function sampleQuoteLines(db: DB, leadId: string): PriceLine[] {
-  const bom = db.boms.find(b => b.leadId === leadId);
-  if (!bom) return [];
-  return [{ id: uid(), description: `${bom.productName}, incl. fasteners & anchor bolts`, qty: bom.outputQty, unit: bom.outputUnit, rate: recentRate(db, bom.outputUnit) || 1000 }];
-}
-/** Settings → Company defaults first; generic sample terms only where Settings is blank. */
-export function sampleQuoteTerms(db: DB) {
-  return {
-    paymentTerms: db.settings?.quotePaymentTerms?.trim() || SAMPLE_PAYMENT_TERMS,
-    deliveryTerms: db.settings?.quoteDeliveryTerms?.trim() || SAMPLE_DELIVERY_TERMS,
-    terms: db.settings?.quoteTerms?.trim() || SAMPLE_TNC,
-  };
-}
-
 /** Client PO number in the client's style, unused across existing Client POs. */
 export function sampleClientPoNumber(db: DB, lead: Lead) {
   const initials = lead.company.split(/\s+/).filter(w => /^[A-Z]/.test(w) && !/^(Pvt|Ltd|LLP)$/.test(w)).map(w => w[0]).join('').slice(0, 4) || 'CL';
@@ -124,10 +99,6 @@ export function sampleClientPoNumber(db: DB, lead: Lead) {
   do { no = `${initials}/PO/${year()}/${String(n++).padStart(4, '0')}`; } while (used.has(lower(no)));
   return no;
 }
-export const sampleSiteAddress = (lead: Lead) => {
-  const p = LEAD_POOL.find(x => x.company === lead.company);
-  return p ? p.site : lead.project ? `Site: ${lead.project}` : `${lead.company} — project site`;
-};
 
 /* ------------------------------------------------------------------ Procurement */
 
@@ -213,17 +184,6 @@ export function sampleDispatch(db: DB, leadId: string) {
   let n = db.dispatches.length + 1001, lr = '';
   do { lr = `LR-${year()}-${n++}`; } while (usedLr.has(lower(lr)));
   return { dispatchDate: todayISO(), vehicleNo: prev?.vehicleNo ?? t[0], transporter: prev?.transporter ?? t[1], driver: prev?.driver ?? t[2], lrNumber: lr, dueDate: addDays(todayISO(), 30) };
-}
-
-/** A valid partial amount: about half the balance in round thousands; the full balance when it is small. */
-export function samplePaymentAmount(outstanding: number) {
-  if (outstanding <= 0) return 0;
-  if (outstanding < 20000) return outstanding;
-  return Math.min(outstanding, Math.round(outstanding / 2 / 1000) * 1000);
-}
-export function samplePaymentRef(db: DB) {
-  const n = db.receivables.reduce((a, r) => a + r.payments.length, 0) + db.payables.reduce((a, r) => a + r.payments.length, 0) + 1;
-  return `UTR${year()}${String(Date.now()).slice(-6)}${String(n).padStart(3, '0')}`;
 }
 
 /* ------------------------------------------------------------------ People */

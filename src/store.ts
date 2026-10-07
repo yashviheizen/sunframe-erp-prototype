@@ -101,6 +101,8 @@ export const availableQty = (db: DB, materialId: ID) => {
 export const bomForLead = (db: DB, leadId: ID) => db.boms.find(b => b.leadId === leadId);
 export const quoteForLead = (db: DB, leadId: ID) => db.quotes.find(q => q.leadId === leadId);
 export const clientPoForLead = (db: DB, leadId: ID) => db.clientPOs.find(p => p.leadId === leadId);
+/** How a Client PO is referred to: its number when one was recorded (older records), otherwise the uploaded file's name. */
+export const clientPoLabel = (c: Pick<ClientPO, 'poNumber' | 'file'>) => c.poNumber || c.file?.name || 'Client PO';
 export const soForLead = (db: DB, leadId: ID) => db.salesOrders.find(s => s.leadId === leadId);
 export const moForLead = (db: DB, leadId: ID) => db.mos.find(m => m.leadId === leadId);
 export const leadById = (db: DB, id?: ID) => db.leads.find(l => l.id === id);
@@ -228,7 +230,8 @@ interface Store {
   saveQuote: (leadId: ID, q: Omit<Quote, 'id' | 'ref' | 'leadId' | 'bomId' | 'version' | 'status' | 'sentAt'>) => Quote;
   markQuoteSent: (quoteId: ID, pdf?: FileMeta) => void;
   reviseQuote: (quoteId: ID) => void;
-  saveClientPO: (leadId: ID, p: Omit<ClientPO, 'id' | 'leadId' | 'createdAt' | 'documentId'>) => ClientPO;
+  /** The Client PO is a document upload; structured fields are optional (kept on older records) and never edited afterwards. */
+  saveClientPO: (leadId: ID, p: { file: FileMeta } & Partial<Omit<ClientPO, 'id' | 'leadId' | 'createdAt' | 'documentId' | 'file'>>) => ClientPO;
   createSO: (leadId: ID, s: Omit<SalesOrder, 'id' | 'ref' | 'leadId' | 'clientPoId' | 'subtotal' | 'total' | 'documentId'>, pdf?: (ref: string) => Promise<FileMeta>) => Promise<SalesOrder>;
   createMO: (leadId: ID, plannedDate: string, reconcile?: { qty: number; note: string }) => ManufacturingOrder;
   raiseShortfallPR: (moId: ID) => PurchaseRequest;
@@ -478,25 +481,14 @@ const storeCreator: StateCreator<Store> = (set, get) => {
         /* ---------------- Client PO */
         saveClientPO: (leadId, p) => mut(db => {
           const lead = leadById(db, leadId) ?? fail('Lead not found');
-          if (lead.stage !== 'Closed') fail('Close the deal as won before entering the Client PO.');
-          if (soForLead(db, leadId)) fail('A sales order already exists for this Client PO, so it is locked.');
-          if (!p.poNumber.trim()) fail('Client PO number is required.');
-          if (!p.poDate) fail('Client PO date is required.');
-          if (!p.lines.length || p.lines.some(l => !l.description.trim() || !(l.qty > 0))) fail('Each item needs a description and quantity.');
-          if (!(p.amount > 0)) fail('Enter the PO amount.');
-          if (!p.paymentTerms.trim()) fail('Payment terms are required.');
-          if (!p.deliveryAddress.trim()) fail('Delivery address is required.');
-          let cpo = clientPoForLead(db, leadId);
-          const fileChanged = p.file && p.file.fileId !== cpo?.file?.fileId;
-          if (cpo) { Object.assign(cpo, p); log(db, `Client PO ${p.poNumber} updated`, leadId); }
-          else {
-            cpo = { id: uid(), leadId, createdAt: now(), ...p };
-            db.clientPOs.push(cpo);
-            log(db, `Client PO ${p.poNumber} recorded`, leadId);
-          }
-          if (fileChanged && p.file) {
-            cpo.documentId = addDoc(db, { name: p.file.name, file: p.file, partyType: 'client', partyName: lead.company, category: 'Client PO', linkedRef: p.poNumber, leadId, refType: 'cpo', refId: cpo.id });
-          }
+          if (lead.stage !== 'Closed') fail('Close the deal as won before uploading the Client PO.');
+          if (clientPoForLead(db, leadId)) fail('The Client PO has already been uploaded and is read-only.');
+          if (!p.file) fail('Choose the Client PO file to upload.');
+          const cpo: ClientPO = { id: uid(), leadId, createdAt: now(), poNumber: p.poNumber?.trim() ?? '', poDate: p.poDate || todayISO(), lines: p.lines ?? [], amount: p.amount ?? 0,
+            paymentTerms: p.paymentTerms ?? '', deliveryTerms: p.deliveryTerms ?? '', deliveryAddress: p.deliveryAddress ?? '', terms: p.terms ?? '', file: p.file };
+          db.clientPOs.push(cpo);
+          cpo.documentId = addDoc(db, { name: p.file.name, file: p.file, partyType: 'client', partyName: lead.company, category: 'Client PO', linkedRef: clientPoLabel(cpo), leadId, refType: 'cpo', refId: cpo.id });
+          log(db, `Client PO ${clientPoLabel(cpo)} uploaded`, leadId);
           return cpo;
         }),
 
@@ -506,7 +498,8 @@ const storeCreator: StateCreator<Store> = (set, get) => {
           if (soForLead(db0, leadId)) fail('A sales order already exists for this deal.');
           const cpo0 = clientPoForLead(db0, leadId) ?? fail('Enter the Client PO first.');
           if (!s.lines.length || s.lines.some(l => !l.description.trim() || !(l.qty > 0))) fail('Each SO item needs a description and quantity.');
-          if (!cpo0.paymentTerms.trim()) fail('The Client PO has no payment terms. Edit the Client PO first.');
+          if (!s.paymentTerms.trim()) fail('Enter the payment terms (used for the receivable due date).');
+          if (!s.deliveryAddress.trim()) fail('Enter the delivery address.');
           // Reserve the ref first so the PDF carries it.
           const previewRef = `SO-${year()}-${String((db0.counters['SO'] ?? 0) + 1).padStart(4, '0')}`;
           const file = pdf ? await pdf(previewRef) : undefined;
@@ -515,12 +508,12 @@ const storeCreator: StateCreator<Store> = (set, get) => {
             const lead = leadById(db, leadId)!;
             const subtotal = linesSubtotal(s.lines);
             const total = round2(quoteTotals(s).total);
-            // Commercial terms always come from the Client PO so the SO can never diverge from what the client signed.
+            // Terms are entered/reviewed on the SO form (the Client PO is an uploaded document, not structured data).
             const so: SalesOrder = { id: uid(), ref: nextRef(db, 'SO'), leadId, clientPoId: cpo0.id, ...s,
-              paymentTerms: cpo0.paymentTerms, deliveryTerms: cpo0.deliveryTerms, deliveryAddress: cpo0.deliveryAddress, terms: cpo0.terms, subtotal, total };
+              paymentTerms: s.paymentTerms.trim(), deliveryTerms: s.deliveryTerms.trim(), deliveryAddress: s.deliveryAddress.trim(), terms: s.terms.trim(), subtotal, total };
             if (file) so.documentId = addDoc(db, { name: `${so.ref}.pdf`, file, partyType: 'client', partyName: lead.company, category: 'Sales order', linkedRef: so.ref, source: 'Generated', leadId, refType: 'so', refId: so.id });
             db.salesOrders.push(so);
-            log(db, `${so.ref} generated from Client PO ${cpo0.poNumber}`, leadId);
+            log(db, `${so.ref} generated from Client PO ${clientPoLabel(cpo0)}`, leadId);
             return so;
           });
         },

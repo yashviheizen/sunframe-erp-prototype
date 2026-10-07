@@ -140,8 +140,9 @@ export function Input(p: InputHTMLAttributes<HTMLInputElement> & { invalid?: boo
   const { invalid, className = '', ...rest } = p;
   return <input className={'input ' + className} aria-invalid={invalid || undefined} {...rest} />;
 }
-export function NumInput({ value, onChange, ...rest }: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & { value: number | null | undefined; onChange: (n: number) => void; invalid?: boolean }) {
-  const [txt, setTxt] = useState(value === null || value === undefined || Number.isNaN(value) || value === 0 ? (value === 0 ? '0' : '') : String(value));
+/** `blankZero`: a zero value shows as an empty field (for amounts the user still has to enter). */
+export function NumInput({ value, onChange, blankZero, ...rest }: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & { value: number | null | undefined; onChange: (n: number) => void; invalid?: boolean; blankZero?: boolean }) {
+  const [txt, setTxt] = useState(value === null || value === undefined || Number.isNaN(value) || value === 0 ? (value === 0 && !blankZero ? '0' : '') : String(value));
   useEffect(() => { if ((parseFloat(txt) || 0) !== (value ?? 0)) setTxt(value ? String(value) : ''); }, [value]); // eslint-disable-line
   return <Input inputMode="decimal" value={txt} onChange={e => { const v = e.target.value.replace(/[^0-9.]/g, ''); setTxt(v); onChange(parseFloat(v) || 0); }} {...rest} />;
 }

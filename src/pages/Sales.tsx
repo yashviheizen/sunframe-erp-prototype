@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import { Briefcase, ArrowLeft, Check, Lock, Save, Eye, Download, Send, RotateCcw, Trophy, FileText, Factory, Plus, Trash2, RefreshCw, ArrowRight, Pencil, LayoutGrid, History, Upload, ExternalLink } from 'lucide-react';
 import {
   useStore, salesSteps, salesStatus, bomForLead, quoteForLead, clientPoForLead, soForLead, moForLead, materialById, availableQty,
-  moMaterialStatus, leadValue, prsForMO, moOpenShortfall, soBomMatch, receivableBalance, type StepKey,
+  moMaterialStatus, leadValue, prsForMO, moOpenShortfall, soBomMatch, receivableBalance, clientPoLabel, type StepKey,
 } from '../store';
 import type { Lead, PriceLine, BomLine, Quote, DB } from '../lib/types';
 import { UNITS } from '../lib/types';
-import { inr, fmtDate, fmtShort, fmtDateTime, todayISO, addDays, uid, quoteTotals, linesSubtotal, qty as fq, round3 } from '../lib/format';
+import { inr, fmtDate, fmtShort, fmtDateTime, todayISO, addDays, uid, quoteTotals, qty as fq, round3 } from '../lib/format';
 import { quoteSpec, soSpec, specToStoredPdf } from '../lib/docs';
 import { buildPdf } from '../lib/pdf';
 import { downloadBlob, storeFile, openFile, downloadFile } from '../lib/files';
@@ -15,7 +15,7 @@ import { DocPreview, PriceLinesEditor, MaterialSelect } from '../ui/shared';
 import { LeadDrawer } from './CRM';
 import { nav, routeQuery } from '../ui/router';
 import { UploadModal } from './Documents';
-import { sampleBom, sampleQuoteLines, sampleQuoteTerms, sampleClientPoNumber, sampleSiteAddress, sampleClientPoFile } from '../lib/samples';
+import { sampleBom, sampleClientPoNumber, sampleClientPoFile } from '../lib/samples';
 
 /* =================================================================== list */
 
@@ -28,7 +28,7 @@ function SalesTabs({ tab }: { tab: SalesTab }) {
   const unsentQuotes = db.quotes.filter(q => q.status === 'Draft').length;
   const soPending = db.clientPOs.filter(c => !soForLead(db, c.leadId)).length;
   return <>
-    <PageHead title="Sales" sub="One record per lead: BOM → Quote → Client PO → Sales order → Manufacturing order. The lists below show the same records — open a row to edit it in the workspace." />
+    <PageHead title="Sales" sub="One record per lead: BOM → Quote → Client PO (uploaded document) → Sales order → Manufacturing order. The lists below show the same records — open a row to edit it in the workspace." />
     <Tabs value={tab} onChange={k => nav(k === 'workspace' ? 'sales' : `sales/${k}`)} tabs={[
       { key: 'workspace', label: 'Workspace', count: db.leads.length },
       { key: 'orders', label: 'Sales orders', count: db.salesOrders.length, attention: soPending, attentionLabel: 'Client PO awaiting SO' },
@@ -46,13 +46,13 @@ function OrdersList() {
   const [q, setQ] = useState(() => routeQuery('q'));
   const ql = q.toLowerCase();
   const rows = db.salesOrders.map(so => ({ so, lead: db.leads.find(l => l.id === so.leadId)!, cpo: db.clientPOs.find(c => c.id === so.clientPoId), mo: moForLead(db, so.leadId) }))
-    .filter(r => r.lead && (!ql || [r.so.ref, r.lead.company, r.lead.project, r.cpo?.poNumber, r.mo?.ref].some(x => x?.toLowerCase().includes(ql))))
+    .filter(r => r.lead && (!ql || [r.so.ref, r.lead.company, r.lead.project, r.cpo && clientPoLabel(r.cpo), r.mo?.ref].some(x => x?.toLowerCase().includes(ql))))
     .sort((a, z) => z.so.date.localeCompare(a.so.date));
-  const list = useList(rows, { resetKey: [q], sort: { so: r => r.so.ref, client: r => r.lead.company, cpo: r => r.cpo?.poNumber, date: r => r.so.date, delivery: r => r.so.expectedDelivery, total: r => r.so.total, mo: r => r.mo?.ref } });
+  const list = useList(rows, { resetKey: [q], sort: { so: r => r.so.ref, client: r => r.lead.company, cpo: r => r.cpo && clientPoLabel(r.cpo), date: r => r.so.date, delivery: r => r.so.expectedDelivery, total: r => r.so.total, mo: r => r.mo?.ref } });
   const awaiting = db.clientPOs.filter(c => !soForLead(db, c.leadId));
   return <>
     {awaiting.length > 0 && <div className="mb12"><Alert kind="warning">{awaiting.map((c, i) => { const l = db.leads.find(x => x.id === c.leadId);
-      return <span key={c.id}>{i ? ' · ' : ''}Client PO <b>{c.poNumber}</b> ({l?.company}) has no sales order yet — <button className="link" onClick={() => openStep(c.leadId, 'so')}>generate SO</button></span>; })}</Alert></div>}
+      return <span key={c.id}>{i ? ' · ' : ''}Client PO <b>{clientPoLabel(c)}</b> ({l?.company}) has no sales order yet — <button className="link" onClick={() => openStep(c.leadId, 'so')}>generate SO</button></span>; })}</Alert></div>}
     <div className="card list">
       <div className="toolbar"><SearchBox value={q} onChange={setQ} placeholder="Search SO, client, Client PO, MO…" /></div>
       {rows.length ? <><div className="table-scroll"><table className="tbl fixed">
@@ -61,13 +61,13 @@ function OrdersList() {
         <tbody>{list.rows.map(({ so, lead, cpo, mo }) => <tr key={so.id} className="clickable" tabIndex={0} onClick={() => openStep(lead.id, 'so')} onKeyDown={e => e.key === 'Enter' && openStep(lead.id, 'so')}>
           <td className="mono strong small">{so.ref}</td>
           <td><div className="primary-cell">{lead.company}</div>{lead.project && <div className="sub">{lead.project}</div>}</td>
-          <td className="mono small">{cpo?.poNumber ?? '—'}</td>
+          <td className="small" title={cpo ? clientPoLabel(cpo) : undefined}>{cpo ? clientPoLabel(cpo) : '—'}</td>
           <td className="small" title={fmtDate(so.date)}>{fmtShort(so.date)}</td>
           <td className="small muted" title={fmtDate(so.expectedDelivery)}>{fmtShort(so.expectedDelivery)}</td>
           <td className="num">{inr(so.total)}</td>
           <td className="small">{mo ? <><span className="mono">{mo.ref}</span>{mo.fgPosted ? <> <Badge plain tone="success">FG</Badge></> : null}</> : <span className="faint">Not created</span>}</td>
         </tr>)}</tbody></table></div>{list.pager}</>
-        : <Empty icon={<FileText size={20} />} title={db.salesOrders.length ? 'No matching sales orders' : 'No sales orders yet'} body="Sales orders are generated from a Client PO in the workspace." />}
+        : <Empty icon={<FileText size={20} />} title={db.salesOrders.length ? 'No matching sales orders' : 'No sales orders yet'} body="Sales orders are generated in the workspace once the Client PO is uploaded." />}
     </div>
   </>;
 }
@@ -212,11 +212,11 @@ function nextAction(db: DB, lead: Lead): { title: string; body: string; step?: S
   const bom = bomForLead(db, lead.id), quote = quoteForLead(db, lead.id), cpo = clientPoForLead(db, lead.id), so = soForLead(db, lead.id), mo = moForLead(db, lead.id);
   if (lead.stage === 'Lost' && !cpo) return { title: 'Deal lost', body: 'No further sales steps. Change the stage in CRM to reopen the deal.' };
   if (!bom) return { title: 'Build the bill of materials', body: 'No stock is reserved at BOM stage.', step: 'bom', cta: 'Open BOM' };
-  if (!quote) return { title: 'Create the quote from the BOM', body: 'Quote lines are pre-filled from the BOM.', step: 'quote', cta: 'Create quote' };
+  if (!quote) return { title: 'Create the quote', body: 'Starts with the BOM product and quantity; enter rates and terms.', step: 'quote', cta: 'Create quote' };
   if (quote.status === 'Draft' && lead.stage !== 'Closed') return { title: 'Finish and send the quote', body: 'Marking it sent moves the lead to "Quote sent".', step: 'quote', cta: 'Open quote' };
   if (lead.stage !== 'Closed') return { title: 'Waiting for the client', body: 'Close the lead as won when the client confirms.', step: 'quote' };
-  if (!cpo) return { title: 'Enter the Client PO', body: 'Record the client purchase order and its file.', step: 'cpo', cta: 'Enter Client PO' };
-  if (!so) return { title: 'Generate the sales order', body: 'Pre-filled from the Client PO; terms are taken from it.', step: 'so', cta: 'Open sales order' };
+  if (!cpo) return { title: 'Upload the Client PO', body: 'Upload the client\'s purchase order document.', step: 'cpo', cta: 'Upload Client PO' };
+  if (!so) return { title: 'Generate the sales order', body: 'Items come from the won quote; enter or review the payment and delivery terms.', step: 'so', cta: 'Open sales order' };
   if (!mo) return soBomMatch(so, bom).matched
     ? { title: 'Create the manufacturing order', body: 'Reserves available stock and raises a PR for any shortfall.', step: 'mo', cta: 'Plan the MO' }
     : { title: 'Reconcile SO and BOM quantities', body: 'The SO quantity differs from the BOM output; confirm what to manufacture.', step: 'mo', cta: 'Reconcile' };
@@ -317,7 +317,7 @@ function Overview({ lead, go }: { lead: Lead; go: (v: View) => void }) {
       <Box title="Sales" onOpen={() => go(so ? 'so' : 'quote')}>
         <dl className="sum-grid"><div><dt>BOM</dt><dd>{bom ? `${bom.ref} · ${fq(bom.outputQty, bom.outputUnit)}` : '—'}</dd></div>
           <div><dt>Quote</dt><dd>{quote ? `${quote.ref} · ${quote.status === 'Quote sent' && lead.stage === 'Closed' ? 'Quote sent · won' : quote.status}` : '—'}</dd></div>
-          <div><dt>Client PO</dt><dd>{cpo ? `${cpo.poNumber} · ${inr(cpo.amount)}` : '—'}</dd></div>
+          <div><dt>Client PO</dt><dd>{cpo ? clientPoLabel(cpo) : '—'}</dd></div>
           <div><dt>Sales order</dt><dd>{so ? `${so.ref} · ${inr(so.total)}` : '—'}</dd></div>
           {so && <div><dt>Payment terms</dt><dd>{so.paymentTerms}</dd></div>}</dl>
       </Box>
@@ -379,8 +379,9 @@ function BomPanel({ lead }: { lead: Lead }) {
   const bom = bomForLead(db, lead.id);
   const locked = !!moForLead(db, lead.id);
   const [editing, setEditing] = useState(!bom);
-  // Saved BOM wins; a new BOM starts from sample lines scaled from the latest BOM (existing materials and units).
-  const [init] = useState(() => bom ?? sampleBom(useStore.getState().db, lead));
+  // A saved BOM always opens with exactly its saved lines. A new BOM starts with ONE material row (sample product, output and
+  // first material scaled from the latest BOM); nothing is ever re-added to a saved BOM.
+  const [init] = useState(() => { if (bom) return bom; const s = sampleBom(useStore.getState().db, lead); return { ...s, lines: s.lines.slice(0, 1) }; });
   const [productName, setPN] = useState(init.productName);
   const [outputQty, setOQ] = useState(init.outputQty);
   const [outputUnit, setOU] = useState(init.outputUnit);
@@ -394,10 +395,15 @@ function BomPanel({ lead }: { lead: Lead }) {
   };
   const cancel = () => { if (!bom) return; setPN(bom.productName); setOQ(bom.outputQty); setOU(bom.outputUnit); setLines(bom.lines); setNotes(bom.notes); setErr(''); setEditing(false); };
   const upd = (id: string, p: Partial<BomLine>) => setLines(ls => ls.map(l => (l.id === id ? { ...l, ...p } : l)));
+  const snap = (b: { productName: string; outputQty: number; outputUnit: string; lines: BomLine[]; notes: string }) =>
+    JSON.stringify([b.productName, b.outputQty, b.outputUnit, b.notes, b.lines.map(l => [l.materialId, l.qty])]);
+  const dirty = !bom || snap(bom) !== snap({ productName, outputQty, outputUnit, lines, notes });
   const quoteSent = quoteForLead(db, lead.id)?.status === 'Quote sent';
   const edit = editing && !locked;
   return <>
-    <PanelHead title="Bill of materials" sub="Raw materials needed for this order. Nothing is reserved until an MO is created." badge={bom && <span className="mono small muted">{bom.ref}</span>}
+    <PanelHead title="Bill of materials" sub="Raw materials needed for this order. Nothing is reserved until an MO is created." badge={<>{bom && <span className="mono small muted">{bom.ref}</span>}
+      {/* The saved tick reflects the stored BOM only — never unsaved edits or a failed save. */}
+      {edit && dirty ? <Badge tone="warning">{bom ? 'Unsaved changes' : 'Not saved'}</Badge> : bom && <Badge tone="success"><Check size={11} /> Saved</Badge>}</>}
       actions={edit ? <>{bom && <Button size="sm" onClick={cancel}>Cancel</Button>}<Button size="sm" variant="primary" icon={<Save size={14} />} onClick={save}>{bom ? 'Save changes' : 'Save BOM'}</Button></>
         : !locked && <Button size="sm" icon={<Pencil size={13} />} onClick={() => setEditing(true)}>Edit</Button>} />
     <div className="card-pad">
@@ -413,16 +419,17 @@ function BomPanel({ lead }: { lead: Lead }) {
       <div className="table-wrap mt12" style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
         <table className="tbl tbl-compact">
           <thead><tr><th style={{ width: 32 }}>#</th><th style={{ minWidth: 300 }}>Material</th><th style={{ width: 130 }}>Category</th><th className="num" style={{ width: 110 }}>Qty</th><th style={{ width: 56 }}>Unit</th><th className="num" style={{ width: 120 }}>Available now</th>{edit && <th style={{ width: 40 }} />}</tr></thead>
-          <tbody>{lines.map((l, i) => {
+          <tbody>{!lines.length && <tr><td colSpan={edit ? 7 : 6} className="muted small center">No materials. Add a material row before saving.</td></tr>}
+            {lines.map((l, i) => {
             const m = materialById(db, l.materialId);
             return <tr key={l.id}>
               <td className="faint">{i + 1}</td>
               <td>{!edit ? <span>{m?.code} · {m?.name}</span> : <MaterialSelect label={`Row ${i + 1} material`} value={l.materialId} exclude={lines.map(x => x.materialId)} onChange={id => upd(l.id, { materialId: id })} />}</td>
               <td className="muted small">{m?.category ?? '—'}</td>
-              <td>{!edit ? <div className="right">{fq(l.qty)}</div> : <NumInput aria-label={`Row ${i + 1} quantity`} className="right" value={l.qty} onChange={n => upd(l.id, { qty: n })} />}</td>
+              <td>{!edit ? <div className="right">{fq(l.qty)}</div> : <NumInput aria-label={`Row ${i + 1} quantity`} className="right" blankZero placeholder="0" value={l.qty} onChange={n => upd(l.id, { qty: n })} />}</td>
               <td className="muted">{m?.unit ?? '—'}</td>
               <td className="num muted">{m ? fq(availableQty(db, m.id), m.unit) : '—'}</td>
-              {edit && <td><Button size="sm" variant="ghost" iconOnly aria-label={`Remove row ${i + 1}`} disabled={lines.length <= 1} onClick={() => setLines(ls => ls.filter(x => x.id !== l.id))} icon={<Trash2 size={14} />} /></td>}
+              {edit && <td><Button size="sm" variant="ghost" iconOnly aria-label={`Remove row ${i + 1}`} onClick={() => setLines(ls => ls.filter(x => x.id !== l.id))} icon={<Trash2 size={14} />} /></td>}
             </tr>;
           })}</tbody>
         </table>
@@ -441,15 +448,22 @@ function linesFromBom(db: DB, leadId: string): PriceLine[] {
   return bom.lines.map(l => { const m = materialById(db, l.materialId); return { id: uid(), description: m?.name ?? '', qty: l.qty, unit: m?.unit ?? '', rate: 0 }; });
 }
 
+/** One line for the BOM's finished product and output quantity; the rate is blank for the user to enter. */
+function newQuoteLines(db: DB, leadId: string): PriceLine[] {
+  const bom = bomForLead(db, leadId);
+  return [{ id: uid(), description: bom?.productName ?? '', qty: bom?.outputQty ?? 0, unit: bom?.outputUnit ?? 'sets', rate: 0 }];
+}
+
 function QuotePanel({ lead }: { lead: Lead }) {
   const db = useStore(s => s.db);
   const quote = quoteForLead(db, lead.id);
   const draft = !quote || quote.status === 'Draft';
+  // A saved quote (any revision) opens with its own data. A new quote carries only real context: the saved BOM's product and
+  // output quantity as one line (rate left for the user) and the company's own default terms from Settings — no sample
+  // descriptions, prices or terms.
   const [f, setF] = useState(() => quote ? { ...quote } : {
-    // One product line matching the BOM output (keeps SO → MO in step), priced from recent quotes.
-    date: todayISO(), validDays: 15, lines: sampleQuoteLines(db, lead.id).length ? sampleQuoteLines(db, lead.id) : linesFromBom(db, lead.id), discountPct: 0, freight: 0, gstPct: 18,
-    // Terms default from Settings → Company; sample terms only where Settings is blank.
-    ...sampleQuoteTerms(db),
+    date: todayISO(), validDays: 15, lines: newQuoteLines(db, lead.id), discountPct: 0, freight: 0, gstPct: 18,
+    paymentTerms: db.settings?.quotePaymentTerms?.trim() ?? '', deliveryTerms: db.settings?.quoteDeliveryTerms?.trim() ?? '', terms: db.settings?.quoteTerms?.trim() ?? '',
   });
   const [err, setErr] = useState('');
   const [preview, setPreview] = useState(false);
@@ -484,7 +498,7 @@ function QuotePanel({ lead }: { lead: Lead }) {
   const status = quote?.status ?? 'Draft';
 
   return <>
-    <PanelHead title="Quote" sub={quote ? `${quote.ref}${quote.version > 1 ? ` · revision ${quote.version}` : ''}` : 'Generated from the BOM — add rates and terms.'}
+    <PanelHead title="Quote" sub={quote ? `${quote.ref}${quote.version > 1 ? ` · revision ${quote.version}` : ''}` : 'Starts with the BOM product and quantity — enter the rate, charges and terms.'}
       badge={won && quote ? <Badge tone="success">Won</Badge> : <Badge>{quote ? status : 'Not saved'}</Badge>}
       actions={<>
         <Button icon={<Eye size={15} />} onClick={() => setPreview(true)}>Preview</Button>
@@ -511,9 +525,9 @@ function QuotePanel({ lead }: { lead: Lead }) {
       <PriceLinesEditor lines={f.lines} readOnly={!draft} onChange={l => set('lines', l)} />
       <div className="row mt16" style={{ alignItems: 'flex-start', gap: 24 }}>
         <div style={{ flex: 1, minWidth: 0 }} className="col">{draft ? <>
-          <Field label="Payment terms" htmlFor="q-pt" hint={!db.settings?.quotePaymentTerms ? 'Set a default in Settings → Company' : undefined}><Input id="q-pt" disabled={!draft} value={f.paymentTerms} onChange={e => set('paymentTerms', e.target.value)} /></Field>
+          <Field label="Payment terms" htmlFor="q-pt" hint={!db.settings?.quotePaymentTerms ? 'Set a default in Settings → Company' : undefined}><Input id="q-pt" disabled={!draft} placeholder="e.g. 30 days from dispatch" value={f.paymentTerms} onChange={e => set('paymentTerms', e.target.value)} /></Field>
           <div className="mt8" />
-          <Field label="Delivery terms" htmlFor="q-dt"><Input id="q-dt" disabled={!draft} value={f.deliveryTerms} onChange={e => set('deliveryTerms', e.target.value)} /></Field>
+          <Field label="Delivery terms" htmlFor="q-dt"><Input id="q-dt" disabled={!draft} placeholder="e.g. Door delivery to site" value={f.deliveryTerms} onChange={e => set('deliveryTerms', e.target.value)} /></Field>
           <div className="mt8" />
           <Field label="Terms and conditions" htmlFor="q-tc"><Textarea id="q-tc" disabled={!draft} rows={3} placeholder="Your standard quote terms (default from Settings → Company)" value={f.terms} onChange={e => set('terms', e.target.value)} /></Field>
           </> : <><div className="section-title" style={{ marginTop: 0 }}>Terms and conditions</div><div className="small" style={{ whiteSpace: 'pre-wrap' }}>{f.terms || <span className="faint">None</span>}</div></>}
@@ -541,65 +555,44 @@ function QuotePanel({ lead }: { lead: Lead }) {
 function ClientPOPanel({ lead }: { lead: Lead }) {
   const db = useStore(s => s.db);
   const cpo = clientPoForLead(db, lead.id);
-  const quote = quoteForLead(db, lead.id);
-  const locked = !!soForLead(db, lead.id);
-  const [f, setF] = useState(() => cpo ? { ...cpo } : {
-    poNumber: sampleClientPoNumber(db, lead), poDate: todayISO(),
-    lines: quote ? quote.lines.map(l => ({ ...l, id: uid() })) : [{ id: uid(), description: '', qty: 0, unit: 'sets', rate: 0 }],
-    amount: quote ? Math.round(quoteTotals(quote).total * 100) / 100 : 0,
-    paymentTerms: quote?.paymentTerms || sampleQuoteTerms(db).paymentTerms, deliveryTerms: quote?.deliveryTerms ?? '', deliveryAddress: sampleSiteAddress(lead), terms: quote?.terms ?? '',
-    file: undefined as undefined | import('../lib/types').FileMeta,
-  });
-  const [editing, setEditing] = useState(!cpo);
-  const edit = editing && !locked;
-  // A new Client PO starts with a generated, clearly fictional sample PO file (stored only on save).
-  const cpoSample = () => sampleClientPoFile(useStore.getState().db, lead, f);
-  const [file, setFile] = useState<File | null>(() => cpo ? null : cpoSample());
+  const [file, setFile] = useState<File | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const set = (k: string, v: unknown) => setF(p => ({ ...p, [k]: v }));
+  // "Use sample file" offers a generated, clearly labelled fictional PO; nothing is attached until the user picks it.
+  const sample = () => {
+    const d = useStore.getState().db, q = quoteForLead(d, lead.id);
+    return sampleClientPoFile(d, lead, { poNumber: sampleClientPoNumber(d, lead), lines: q?.lines ?? [], amount: q ? Math.round(quoteTotals(q).total * 100) / 100 : 0, paymentTerms: q?.paymentTerms ?? '' });
+  };
+  const act = (fn: () => Promise<void>) => fn().catch(e => toastError((e as Error).message));
   const save = async () => {
+    if (!file) return setErr('Choose the Client PO file to upload.');
     setBusy(true);
     try {
-      const meta = file ? await storeFile(file) : f.file;
-      const r = attempt(() => useStore.getState().saveClientPO(lead.id, { poNumber: f.poNumber, poDate: f.poDate, lines: f.lines, amount: f.amount, paymentTerms: f.paymentTerms,
-        deliveryTerms: f.deliveryTerms, deliveryAddress: f.deliveryAddress, terms: f.terms, file: meta }), cpo ? 'Client PO updated' : 'Client PO saved');
-      if (r.ok) { setErr(''); setFile(null); setF(p => ({ ...p, file: meta })); setEditing(false); } else setErr(r.error);
-    } finally { setBusy(false); }
+      const meta = await storeFile(file);
+      const r = attempt(() => useStore.getState().saveClientPO(lead.id, { file: meta }), 'Client PO uploaded');
+      if (r.ok) { setErr(''); setFile(null); } else setErr(r.error);
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
-  const sub = linesSubtotal(f.lines);
-  return <>
-    <PanelHead title="Client purchase order" sub="Entered after the deal is won. The sales order is pre-filled from this." badge={cpo && <Badge tone="success">Received</Badge>}
-      actions={edit ? <>{cpo && <Button size="sm" onClick={() => { setF({ ...cpo }); setFile(null); setErr(''); setEditing(false); }}>Cancel</Button>}
-        <Button size="sm" variant="primary" icon={<Save size={14} />} disabled={busy} onClick={save}>{cpo ? 'Save changes' : 'Save Client PO'}</Button></>
-        : !locked && <Button size="sm" icon={<Pencil size={13} />} onClick={() => setEditing(true)}>Edit</Button>} />
+  if (cpo) return <>
+    <PanelHead title="Client purchase order" sub="The client's PO document, linked to this deal and listed in Documents. Read-only once uploaded." badge={<Badge tone="success">Received</Badge>}
+      actions={cpo.file && <><Button size="sm" icon={<Eye size={14} />} onClick={() => act(() => openFile(cpo.file!))}>View</Button>
+        <Button size="sm" icon={<Download size={14} />} onClick={() => act(() => downloadFile(cpo.file!))}>Download</Button></>} />
     <div className="card-pad">
-      {locked && <div className="mb12"><Alert kind="info">The sales order has been generated, so this Client PO is locked.</Alert></div>}
+      <dl className="sum-grid">
+        <div><dt>Document</dt><dd>{cpo.file ? <FileLink meta={cpo.file} compact /> : <span className="faint">No file</span>}</dd></div>
+        {cpo.poNumber && <div><dt>Client PO number</dt><dd className="mono">{cpo.poNumber}</dd></div>}
+        <div><dt>Uploaded</dt><dd>{fmtDateTime(cpo.createdAt)}</dd></div>
+        {cpo.file && <div><dt>Documents</dt><dd><button className="link" onClick={() => nav(`documents?q=${encodeURIComponent(cpo.file!.name)}`)}>Open in Documents</button></dd></div>}
+      </dl>
+    </div>
+  </>;
+  return <>
+    <PanelHead title="Client purchase order" sub="Upload the client's PO document after the deal is won. Payment and delivery terms are entered on the sales order." />
+    <div className="card-pad">
       {err && <div className="mb12"><Alert kind="error">{err}</Alert></div>}
-      {!edit && cpo ? <>
-        <dl className="sum-grid"><div><dt>Client PO number</dt><dd className="mono">{cpo.poNumber}</dd></div><div><dt>PO date</dt><dd>{fmtDate(cpo.poDate)}</dd></div>
-          <div><dt>Amount (incl. GST)</dt><dd>{inr(cpo.amount, { decimals: true })}</dd></div><div><dt>Payment terms</dt><dd>{cpo.paymentTerms}</dd></div>
-          <div><dt>Delivery terms</dt><dd>{cpo.deliveryTerms || '—'}</dd></div><div><dt>Delivery address</dt><dd>{cpo.deliveryAddress}</dd></div>
-          <div><dt>File</dt><dd>{cpo.file ? <FileLink meta={cpo.file} compact /> : <span className="faint">No file</span>}</dd></div>
-          {cpo.terms && <div><dt>Terms</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{cpo.terms}</dd></div>}</dl>
-        <div className="section-title mt16">Items</div>
-        <PriceLinesEditor lines={cpo.lines} readOnly />
-      </> : <>
-      <div className="grid g3">
-        <Field label="Client PO number" required htmlFor="c-no"><Input id="c-no" value={f.poNumber} onChange={e => set('poNumber', e.target.value)} placeholder="As printed on the client's PO" /></Field>
-        <Field label="PO date" required htmlFor="c-d"><Input id="c-d" type="date" value={f.poDate} onChange={e => set('poDate', e.target.value)} /></Field>
-        <Field label="PO amount (₹, incl. GST)" required htmlFor="c-amt" hint={`Items subtotal ${inr(sub)}`}><NumInput id="c-amt" value={f.amount} onChange={n => set('amount', n)} /></Field>
-      </div>
-      <div className="section-title mt16">Items</div>
-      <PriceLinesEditor lines={f.lines} onChange={l => set('lines', l)} />
-      <div className="form-grid mt16">
-        <Field label="Payment terms" required htmlFor="c-pt" hint='e.g. "45 days from dispatch" — used for the receivable due date'><Input id="c-pt" value={f.paymentTerms} onChange={e => set('paymentTerms', e.target.value)} /></Field>
-        <Field label="Delivery terms" htmlFor="c-dt"><Input id="c-dt" value={f.deliveryTerms} onChange={e => set('deliveryTerms', e.target.value)} /></Field>
-        <Field label="Delivery address" required full htmlFor="c-ad"><Textarea id="c-ad" rows={2} value={f.deliveryAddress} onChange={e => set('deliveryAddress', e.target.value)} /></Field>
-        <Field label="Terms and conditions" full htmlFor="c-tc"><Textarea id="c-tc" rows={2} value={f.terms} onChange={e => set('terms', e.target.value)} /></Field>
-        <Field label="Client PO file" full>{<FilePick file={file} onChange={setFile} existing={f.file} sample={cpoSample} label="Upload PO" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xlsx" />}</Field>
-      </div>
-      </>}
+      <Field label="Client PO document" required><FilePick file={file} onChange={f => { setFile(f); setErr(''); }} sample={sample} label="Choose file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xlsx" /></Field>
+      <div className="row mt12"><span className="muted small">Saved files can be viewed and downloaded here and in Documents. The upload can't be edited afterwards.</span><div className="spacer" />
+        <Button variant="primary" icon={<Upload size={14} />} disabled={busy || !file} onClick={save}>{busy ? 'Uploading…' : 'Save Client PO'}</Button></div>
     </div>
   </>;
 }
@@ -613,19 +606,19 @@ function SOPanel({ lead }: { lead: Lead }) {
   const [gen, setGen] = useState(false);
   const [preview, setPreview] = useState(false);
   if (!so) return <>
-    <PanelHead title="Sales order" sub={`Pre-filled from Client PO ${cpo.poNumber}.`} actions={<Button variant="primary" icon={<FileText size={15} />} onClick={() => setGen(true)}>Generate SO</Button>} />
-    <Empty icon={<FileText size={20} />} title="No sales order yet" body="Generate the SO to review an editable preview built from the Client PO, then confirm it."
+    <PanelHead title="Sales order" sub={`For Client PO ${clientPoLabel(cpo)}. Items come from the won quote; enter or review the terms.`} actions={<Button variant="primary" icon={<FileText size={15} />} onClick={() => setGen(true)}>Generate SO</Button>} />
+    <Empty icon={<FileText size={20} />} title="No sales order yet" body="Generate the SO, enter or review items and terms, preview it, then confirm. MO planning starts after confirmation."
       action={<Button variant="primary" onClick={() => setGen(true)}>Generate SO</Button>} />
     {gen && <GenerateSOModal lead={lead} onClose={() => setGen(false)} />}
   </>;
-  const spec = soSpec(so, lead, cpo.poNumber, cpo.poDate);
+  const spec = soSpec(so, lead, clientPoLabel(cpo), cpo.poDate);
   const doc = db.documents.find(d => d.id === so.documentId);
   return <>
     <PanelHead title="Sales order" sub={so.ref} badge={<Badge tone="success">Confirmed</Badge>}
       actions={<><Button icon={<Eye size={15} />} onClick={() => setPreview(true)}>Preview</Button>
         <Button icon={<Download size={15} />} onClick={() => downloadBlob(buildPdf(spec), `${so.ref}.pdf`)}>PDF</Button></>} />
     <div className="card-pad">
-      <KV items={[['SO number', <span className="mono">{so.ref}</span>], ['SO date', fmtDate(so.date)], ['Client PO', `${cpo.poNumber} · ${fmtDate(cpo.poDate)}`],
+      <KV items={[['SO number', <span className="mono">{so.ref}</span>], ['SO date', fmtDate(so.date)], ['Client PO', cpo.file ? <FileLink meta={cpo.file} compact /> : clientPoLabel(cpo)],
         ['Expected delivery', fmtDate(so.expectedDelivery)], ['Payment terms', so.paymentTerms], ['Delivery terms', so.deliveryTerms], ['Delivery address', so.deliveryAddress],
         ['Order total', <b>{inr(so.total, { decimals: true })}</b>], ['Document', doc ? <FileLink meta={doc.file} /> : '']]} />
       <div className="section-title mt24">Items</div>
@@ -639,27 +632,30 @@ function GenerateSOModal({ lead, onClose }: { lead: Lead; onClose: () => void })
   const db = useStore(s => s.db);
   const cpo = clientPoForLead(db, lead.id)!;
   const quote = quoteForLead(db, lead.id);
+  // Items and charges come from the won quote; terms start from the quote (or an older structured Client PO) and are
+  // entered/reviewed here — they are never read from the uploaded PO document.
   const [f, setF] = useState({
-    date: todayISO(), expectedDelivery: addDays(todayISO(), 28), lines: cpo.lines.map(l => ({ ...l, id: uid() })),
+    date: todayISO(), expectedDelivery: addDays(todayISO(), 28), lines: (cpo.lines.length ? cpo.lines : quote?.lines ?? []).map(l => ({ ...l, id: uid() })),
     discountPct: quote?.discountPct ?? 0, freight: quote?.freight ?? 0, gstPct: quote?.gstPct ?? 18,
-    paymentTerms: cpo.paymentTerms, deliveryTerms: cpo.deliveryTerms, deliveryAddress: cpo.deliveryAddress, terms: cpo.terms,
+    paymentTerms: cpo.paymentTerms || quote?.paymentTerms || '', deliveryTerms: cpo.deliveryTerms || quote?.deliveryTerms || '',
+    deliveryAddress: cpo.deliveryAddress || '', terms: cpo.terms || quote?.terms || '',
   });
-  const [view, setView] = useState<'edit' | 'preview'>('preview');
+  const [view, setView] = useState<'edit' | 'preview'>('edit');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k: string, v: unknown) => setF(p => ({ ...p, [k]: v }));
   const nextRef = `SO-${new Date().getFullYear()}-${String((db.counters['SO'] ?? 0) + 1).padStart(4, '0')}`;
-  const spec = soSpec({ ...f, ref: nextRef }, lead, cpo.poNumber, cpo.poDate);
+  const spec = soSpec({ ...f, ref: nextRef }, lead, clientPoLabel(cpo), cpo.poDate);
   const total = quoteTotals(f).total;
   const confirm = async () => {
     setBusy(true); setErr('');
     try {
-      const so = await useStore.getState().createSO(lead.id, f, ref => specToStoredPdf(soSpec({ ...f, ref }, lead, cpo.poNumber, cpo.poDate), `${ref}.pdf`));
+      const so = await useStore.getState().createSO(lead.id, f, ref => specToStoredPdf(soSpec({ ...f, ref }, lead, clientPoLabel(cpo), cpo.poDate), `${ref}.pdf`));
       toast(`${so.ref} generated`); onClose();
     } catch (e) { setErr((e as Error).message); setView('edit'); } finally { setBusy(false); }
   };
-  const diff = Math.abs(total - cpo.amount) > 1;
-  return <Modal size="lg" title="Generate sales order" subtitle={`Pre-filled from Client PO ${cpo.poNumber}. Dates, items and charges can be adjusted; terms come from the Client PO.`} onClose={onClose}
+  const diff = cpo.amount > 0 && Math.abs(total - cpo.amount) > 1;
+  return <Modal size="lg" title="Generate sales order" subtitle={`For Client PO ${clientPoLabel(cpo)}. Items come from the won quote. Enter or review the terms agreed with the client.`} onClose={onClose}
     footer={<><span className="muted small" style={{ marginRight: 'auto' }}>Order total {inr(total, { decimals: true })}</span><Button onClick={onClose}>Cancel</Button>
       <Button variant="primary" icon={<Check size={15} />} disabled={busy} onClick={confirm}>{busy ? 'Generating…' : `Confirm ${nextRef}`}</Button></>}>
     <div className="row mb16">
@@ -677,9 +673,13 @@ function GenerateSOModal({ lead, onClose }: { lead: Lead; onClose: () => void })
       </div>
       <div className="section-title mt16">Items</div>
       <PriceLinesEditor lines={f.lines} onChange={l => set('lines', l)} />
-      <div className="section-title mt16 row" style={{ gap: 6 }}>Terms from Client PO {cpo.poNumber}<InfoTip text="SO terms always equal the Client PO terms. To change them, edit the Client PO before generating the SO." /></div>
-      <dl className="sum-grid"><div><dt>Payment terms</dt><dd>{cpo.paymentTerms}</dd></div><div><dt>Delivery terms</dt><dd>{cpo.deliveryTerms || '—'}</dd></div>
-        <div><dt>Delivery address</dt><dd>{cpo.deliveryAddress}</dd></div>{f.terms && <div><dt>Terms</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{f.terms}</dd></div>}</dl>
+      <div className="section-title mt16 row" style={{ gap: 6 }}>Terms<InfoTip text="Enter or review the terms agreed with the client. They are not read from the uploaded Client PO." /></div>
+      <div className="form-grid">
+        <Field label="Payment terms" required htmlFor="s-pt" hint='e.g. "45 days from dispatch" — used for the receivable due date'><Input id="s-pt" value={f.paymentTerms} onChange={e => set('paymentTerms', e.target.value)} /></Field>
+        <Field label="Delivery terms" htmlFor="s-dt"><Input id="s-dt" value={f.deliveryTerms} onChange={e => set('deliveryTerms', e.target.value)} /></Field>
+        <Field label="Delivery address" required full htmlFor="s-ad"><Textarea id="s-ad" rows={2} value={f.deliveryAddress} onChange={e => set('deliveryAddress', e.target.value)} /></Field>
+        <Field label="Terms and conditions" full htmlFor="s-tc"><Textarea id="s-tc" rows={3} value={f.terms} onChange={e => set('terms', e.target.value)} /></Field>
+      </div>
     </>}
   </Modal>;
 }

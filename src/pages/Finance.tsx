@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Wallet, IndianRupee } from 'lucide-react';
 import { useStore, leadById, supplierById, receivableBalance } from '../store';
-import { samplePaymentAmount, samplePaymentRef, sampleProofFile } from '../lib/samples';
+import { sampleProofFile } from '../lib/samples';
 import type { Receivable, Payable } from '../lib/types';
 import { inr, fmtDate, fmtShort, todayISO, daysBetween } from '../lib/format';
 import { storeFile } from '../lib/files';
@@ -52,8 +52,9 @@ function Ledger({ kind }: { kind: Kind }) {
   const startDate = (r: Receivable | Payable) => kind === 'rec' ? db.dispatches.find(d => d.id === (r as Receivable).dispatchId)?.dispatchDate : (r as Payable).poDate;
   const list = rows.filter(r => {
     const b = receivableBalance(r); const o = dueInfo(r.dueDate, b.outstanding).overdue;
-    const st = o ? 'Overdue' : b.status;
-    return (!ql || [r.ref, party(r), docRef(r)].some(x => x?.toLowerCase().includes(ql))) && (!status || st === status);
+    // Overdue is an extra flag, not a replacement: an overdue Pending/Partially paid row still matches its payment status.
+    const match = !status || (status === 'Overdue' ? o : b.status === status);
+    return (!ql || [r.ref, party(r), docRef(r)].some(x => x?.toLowerCase().includes(ql))) && match;
   });
   const lst = useList(list, { resetKey: [q, status], sort: {
     party, doc: r => docRef(r), start: r => startDate(r), due: r => r.dueDate,
@@ -108,7 +109,7 @@ function EntryDrawer({ kind, id, onClose, onPay }: { kind: Kind; id: string; onC
     <div className="section-title mt24">Payments</div>
     {!r.payments.length ? <div className="muted small">No payments recorded yet.</div>
       : <table className="tbl tbl-compact" style={{ border: '1px solid var(--border)' }}>
-        <thead><tr><th>Date</th><th>Mode / ref</th><th className="num">Amount</th><th>Proof</th></tr></thead>
+        <thead><tr><th>Date</th><th>Mode / ref</th><th className="num">Amount</th><th>Payment proof</th></tr></thead>
         <tbody>{r.payments.map(p => <tr key={p.id}><td className="nowrap">{fmtDate(p.date)}</td><td className="small">{p.mode}<div className="faint">{p.reference}</div></td>
           <td className="num">{inr(p.amount, { decimals: true })}</td><td>{p.proof ? <FileLink meta={p.proof} compact /> : <span className="faint">—</span>}</td></tr>)}</tbody>
       </table>}
@@ -119,15 +120,17 @@ function PaymentModal({ kind, id, onClose }: { kind: Kind; id: string; onClose: 
   const db = useStore(s => s.db);
   const r = (kind === 'rec' ? db.receivables : db.payables).find(x => x.id === id)!;
   const b = receivableBalance(r);
-  // Demo prefill: a valid part-payment (never above the outstanding balance) with a sample UTR and proof. Recorded only on Save.
-  const [f, setF] = useState(() => ({ date: todayISO(), amount: samplePaymentAmount(b.outstanding), mode: 'Bank transfer (NEFT/RTGS)', reference: samplePaymentRef(useStore.getState().db) }));
+  // The amount starts blank: status comes only from the amounts actually recorded (cumulative), never from a proof upload.
+  const [f, setF] = useState(() => ({ date: todayISO(), amount: 0, mode: 'Bank transfer (NEFT/RTGS)', reference: '' }));
   const party = kind === 'rec' ? leadById(db, (r as { leadId?: string }).leadId)?.company ?? '' : supplierById(db, (r as { supplierId?: string }).supplierId)?.name ?? '';
   const proofSample = () => sampleProofFile(useStore.getState().db, r.ref, party, f.amount, f.reference);
-  const [file, setFile] = useState<File | null>(proofSample);
+  const [file, setFile] = useState<File | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const over = f.amount > b.outstanding + 0.004;
+  const after = f.amount > 0 && !over ? (b.outstanding - f.amount <= 0.004 ? 'Paid' : 'Partially paid') : b.status;
   const save = async () => {
+    if (!(f.amount > 0)) return setErr('Enter the amount received/paid (more than ₹0).');
     if (over) return setErr(`Amount exceeds the outstanding balance of ${inr(b.outstanding, { decimals: true })}.`);
     setBusy(true);
     try {
@@ -143,11 +146,14 @@ function PaymentModal({ kind, id, onClose }: { kind: Kind; id: string; onClose: 
     {err && <div className="mb12"><Alert kind="error">{err}</Alert></div>}
     <div className="form-grid">
       <Field label="Payment date" required htmlFor="p-d"><Input id="p-d" type="date" value={f.date} onChange={e => setF(p => ({ ...p, date: e.target.value }))} /></Field>
-      <Field label="Amount (₹)" required htmlFor="p-a" error={over ? 'More than the outstanding balance' : undefined}><NumInput id="p-a" invalid={over} value={f.amount} onChange={n => setF(p => ({ ...p, amount: n }))} /></Field>
+      <Field label="Amount (₹)" required htmlFor="p-a" error={over ? 'More than the outstanding balance' : undefined}><div className="row" style={{ gap: 6 }}><NumInput id="p-a" invalid={over} blankZero placeholder="0.00" value={f.amount} onChange={n => { setErr(''); setF(p => ({ ...p, amount: n })); }} />
+        <Button size="sm" onClick={() => { setErr(''); setF(p => ({ ...p, amount: Math.round(b.outstanding * 100) / 100 })); }}>Full balance</Button></div></Field>
       <Field label="Mode" htmlFor="p-m"><Select id="p-m" value={f.mode} onChange={e => setF(p => ({ ...p, mode: e.target.value }))}>
         {['Bank transfer (NEFT/RTGS)', 'UPI', 'Cheque', 'Cash', 'Other'].map(m => <option key={m}>{m}</option>)}</Select></Field>
       <Field label="Reference / UTR" htmlFor="p-r"><Input id="p-r" value={f.reference} onChange={e => setF(p => ({ ...p, reference: e.target.value }))} /></Field>
-      <Field label="Payment proof (optional)" full><FilePick file={file} onChange={setFile} sample={proofSample} accept="image/*,.pdf" label="Attach proof" /></Field>
+      <Field label="Payment proof (optional)" full hint="Attaching proof doesn't change the status — only the amount does."><FilePick file={file} onChange={setFile} sample={proofSample} accept="image/*,.pdf" label="Attach proof" /></Field>
     </div>
+    <div className="muted small mt12" aria-live="polite">Status after saving: <Badge tone={after === 'Paid' ? 'success' : after === 'Partially paid' ? 'info' : 'neutral'}>{after}</Badge>
+      {f.amount > 0 && !over && <> · outstanding {inr(Math.max(0, b.outstanding - f.amount), { decimals: true })}</>}</div>
   </Modal>;
 }
